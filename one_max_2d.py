@@ -22,7 +22,7 @@
 from deap import base, tools
 
 import numpy as np
-from random import choice, random  #, seed
+from random import choice, random
 
 """
 Typically we need an Individual class and a Population class.
@@ -41,8 +41,6 @@ class Individual(list):
     rows = None
     cols = None
 
-    parent_1 = parent_2 = pre_mutation = None
-
     def __init__(self):
         # DEAP stores fitness values in a Fitness class, which offers some basic operations. (See base.py.)
         # Must set the "weights" before instantiating the Fitness class.
@@ -52,14 +50,18 @@ class Individual(list):
         base.Fitness.weights = (1, )
         self.fitness = base.Fitness()
 
+        self.parent_1 = self.parent_2 = self.pre_mutation = None
+
         # Individual is a subclass of list. So must have a list.
         the_list = [choice([0, 1]) for _ in range(Individual.rows*Individual.cols)]
         super().__init__(the_list)
 
     def __str__(self):
         """
-        Convert this list to an array of elements for printing.
+        Convert this list to a grid for printing.
         """
+        if not self.fitness.valid:
+            self.set_fitness()
         ar = self.to_np_array()
         st = '\n    ' +  \
              '\n    '.join([             # Put a '\n' between rows
@@ -113,15 +115,21 @@ class Population(list):
     CXPB = None
     MUTPB = None
 
-    count = 0
-    prev_best_fitness = None
-
     verbose = None
 
     # Using the toolbox allows us to select some arguments in advance.
     toolbox = base.Toolbox( )
 
-    def __init__(self, pop_size, max_gens, individual_generator, CXPB=0.5, MUTPB=0.2, verbose=True):
+    best_ind = None
+    former_best_ind = None
+
+    prev_best_fitness = None
+
+
+    def __init__(self, pop_size, max_gens, individual_generator,
+                 mate=tools.cxUniform, CXPB=0.7,
+                 mutate=tools.mutFlipBit, MUTPB=0.5,
+                 select=tools.selTournament, verbose=True):
         Population.gen = 0
         # individual_generator is a function that when executed returns an individual.
         # See its use in generating the population at the end of __init__.
@@ -137,32 +145,30 @@ class Population(list):
 
         # Select a crossover operator. (Note use of named parameter.)
         # I tend to like uniform-crossover.
-        self.toolbox.register("mate", tools.cxUniform, indpb=0.5)
+        self.toolbox.register("mate", mate, indpb=0.5)
 
         # register a mutation operator with a probability to
         # flip each attribute/gene of 0.05
-        self.toolbox.register("mutate", tools.mutFlipBit, indpb=0.05)
+        self.toolbox.register("mutate", mutate, indpb=0.05)
 
         # operator for selecting individuals for breeding the next
         # generation: each individual of the current generation
         # is replaced by the 'fittest' (best) of <n> individuals
         # drawn randomly from the current generation.
         # I like tournament selection. Notice the difference tournament size makes.
-        self.toolbox.register("select", tools.selTournament, tournsize=7)
+        self.toolbox.register("select", select, tournsize=7)
 
         # Create a list of Individuals as the initial population.
         pop = [Population.individual_generator() for _ in range(pop_size)]
         super().__init__(pop)
 
     def eval_all(self):
-        Population.count = 0
         for ind in self:
             if not ind.fitness.valid:
                 ind.set_fitness( )
-                Population.count += 1
 
-        best_ind = tools.selBest(self, 1)[0]
-        return best_ind
+        Population.former_best_ind = Population.best_ind
+        Population.best_ind = tools.selBest(self, 1)[0]
 
     def generate_next_generation(self):
         Population.gen += 1
@@ -184,7 +190,6 @@ class Population(list):
         # Apply crossover and mutation to the offspring.
         # Mark those that are the result of crossover or mutation as having invalid fitnesses.
 
-        # Pair the offspring off even-odd.
         # Pair the offspring off even-odd.
         for (child_1, child_2) in zip(offspring[::2], offspring[1::2]):
             # cross two individuals with probability CXPB
@@ -223,35 +228,37 @@ class Population(list):
 
         # Evaluate the individuals with invalid fitnesses.
         # Return the best individual and its fitness.
-        best_ind = self.eval_all()
-        best_fit = best_ind.fitness.values[0]
+        self.eval_all()
+        best_fit = self.best_ind.fitness.values[0]
 
         if self.verbose and best_fit > Population.prev_best_fitness:
-            self.print_stats(best_ind)
+            Utils.print_stats(self)
 
-        return best_ind
 
-    def print_stats(self, best_ind):
-        print(f"\n-- Generation {self.gen} --")
-        print(f"   Evaluated {Population.count} individuals")
+class Utils:
+
+    @staticmethod
+    def print_best(best_ind):
+        cx_segment = f'{Utils.to_ind(best_ind.parent_1)}\n\n+ (crossed with) \n' \
+                     f'{Utils.to_ind(best_ind.parent_2)} \n=>' if best_ind.parent_1 else ''
+        mutation_segment = f'{Utils.to_ind(best_ind.pre_mutation)}\n\n=> (mutated to) \n' \
+                                                                    if best_ind.pre_mutation else ''
+        print(cx_segment + mutation_segment + str(best_ind))
+
+    @staticmethod
+    def print_stats(pop):
+        print(f"\n-- Generation {pop.gen} --")
+        best_ind = pop.best_ind
         best_fit = best_ind.fitness.values[0]
         Population.prev_best_fitness = best_fit
         # Gather all the fitnesses in one list and print the stats.
         # Again, ind.fitness.values is a tuple. We want the first value.
-        fits = [ind.fitness.values[0] for ind in self]
-        mean = sum(fits) / self.pop_size
+        fits = [ind.fitness.values[0] for ind in pop]
+        mean = sum(fits) / pop.pop_size
         sum_sq = sum(x * x for x in fits)
         std = abs(sum_sq / Population.pop_size - mean ** 2) ** 0.5
         print(f"   Min: {min(fits)}; Mean {round(mean, 2)}; Max {best_fit}; Std {round(std, 2)}", end='')
-        Population.print_best(best_ind)
-
-    @staticmethod
-    def print_best(best_ind):
-        cx_segment = f'{Population.to_ind(best_ind.parent_1)}\n\n+ (crossed with) \n' \
-                     f'{Population.to_ind(best_ind.parent_2)} \n=>' if best_ind.parent_1 else ''
-        mutation_segment = f'{Population.to_ind(best_ind.pre_mutation)}\n\n=> (mutated to) \n' \
-                                                                    if best_ind.pre_mutation else ''
-        print(cx_segment + mutation_segment + str(best_ind))
+        Utils.print_best(best_ind)
 
     @staticmethod
     def to_ind(lst):
@@ -270,16 +277,16 @@ def main(verbose=True):
     pop = Population(pop_size=10, max_gens=200,
                      individual_generator=Individual,
                      verbose=verbose)
-    best_ind = pop.eval_all()
+    pop.eval_all()
     if verbose:
-        pop.print_stats(best_ind)
+        Utils.print_stats(pop)
     prefix = 'unsuccessful'
     for _ in range(Population.max_gens):
-        best_fit = best_ind.fitness.values[0]
+        best_fit = Population.best_ind.fitness.values[0]
         if best_fit == Individual.rows*Individual.cols:
             prefix = 'successful'
             break
-        best_ind = pop.generate_next_generation()
+        pop.generate_next_generation()
 
     # We consider the evoluation successful if max_fit indicates that best_ind is all 1's,
     # prefix = "" if best_fit == best_ind.rows*best_ind.cols else "un"

@@ -138,7 +138,10 @@ class Population(list):
     # A reference to the DEAP toolbox.
     toolbox = base.Toolbox( )
 
-    def __init__(self, pop_size, max_gens, individual_generator, CXPB=0.5, MUTPB=0.2, verbose=True):
+    def __init__(self, pop_size, max_gens, individual_generator,
+                 mate=None, CXPB=0.5,
+                 mutate=None, MUTPB=0.2,
+                 select=tools.selTournament, verbose=True):
         # individual_generator is a function that when executed returns an individual.
         # See its use in generating the population at the end of __init__.
         Population.individual_generator = individual_generator
@@ -156,10 +159,10 @@ class Population(list):
 
         # Select a crossover operator. We are using our own crossover operator defined below.
         # We could use a built-in operator.
-        self.toolbox.register("mate", Utils.cx_all_diff)
+        self.toolbox.register("mate", mate)
 
         # Select a mutation operator. Again, we are using our own mutation operator.
-        self.toolbox.register("mutate", Utils.mut_move_elt)
+        self.toolbox.register("mutate", mutate)
 
         # Select the operator for selecting individuals for the next generation.
         # In Tournament selection each individual of the next generation is selected
@@ -167,7 +170,7 @@ class Population(list):
         # A larger <n> results in a more elitist selection process.
         # A tournament size of 2 will repeatedly select two random elements of the current
         # population put the most fit into the next population.
-        self.toolbox.register("select", tools.selTournament, tournsize=2)
+        self.toolbox.register("select", select, tournsize=2)
 
         # Create a list of Individuals as the initial population.
         pop = [Population.individual_generator() for _ in range(pop_size)]
@@ -177,14 +180,9 @@ class Population(list):
         """
         Evaluate all elements in the population and return (one of) the fittest.
         """
-        count = 0
         for ind in self:
             if not ind.fitness.valid:
                 ind.set_fitness( )
-                count += 1
-
-        if self.verbose:
-            print(f"   Evaluated {count} individuals")
 
         best_ind = tools.selBest(self, 1)[0]
         return best_ind
@@ -194,8 +192,6 @@ class Population(list):
         Generate the next generation. It is not returned; it replaces the current generation.
         """
         Population.gen += 1
-        if self.verbose:
-            print(f"\n-- Generation {Population.gen}/{Population.max_gens} --")
 
         # Select the next generation of individuals to use as the starting point.
         # Use tournament selection to select the base population.
@@ -252,6 +248,7 @@ class Population(list):
 
         return best_ind
 
+
 class Utils:
 
     @staticmethod
@@ -296,6 +293,7 @@ class Utils:
 
     @staticmethod
     def print_stats(pop, best_ind):
+        print(f"\n-- Generation {Population.gen}/{Population.max_gens} --")
         # Gather all the fitnesses in a list and print the stats.
         # Again, ind.fitness.values is a tuple. We want the first value.
         fits = [ind.fitness.values[0] for ind in pop]
@@ -318,13 +316,15 @@ def main(verbose=True):
     # often contains a solution--no evolution required.
     pop = Population(pop_size=3, max_gens=50,
                      individual_generator=Individual,
+                     mate=Utils.cx_all_diff, CXPB=0.5,
+                     mutate=Utils.mut_move_elt, MUTPB=0.2,
                      verbose=verbose)
     # Evaluate the fitness of all population elements and return the best.
     best_ind = pop.eval_all()
     if verbose:
-        print()
-        Utils.print_best(best_ind, 'initial ')
-        print("\nStart evolution")
+        Utils.print_stats(pop, best_ind)
+        # Utils.print_best(best_ind, 'initial ')
+        # print("\nStart evolution")
 
     # We have succeeded when the fitness shows that we can place 7 tokens.
     # Generate new populations until then or until we reach max_gens.
