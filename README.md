@@ -1,3 +1,3 @@
 # GA_examples
 
-Some examples to illustrate GAs.
+Moved to https://github.com/RussAbbott/GAs
